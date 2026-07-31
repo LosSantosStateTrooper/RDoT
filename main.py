@@ -2,27 +2,25 @@ import os
 import discord
 from discord import app_commands
 from discord.ext import commands
-import threading
 import asyncio
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from aiohttp import web
 
 # ==========================================
-# Render Timeout Prevention (Dummy Web Server)
+# Render Timeout Prevention (Async Web Server)
 # ==========================================
-class DummyServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"RDoT Bot is alive!")
+async def handle_health_check(request):
+    return web.Response(text="RDoT Bot is alive!")
 
-def run_dummy_server():
+async def start_dummy_server():
+    app = web.Application()
+    app.router.add_get("/", handle_health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
     port = int(os.getenv("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), DummyServer)
-    print(f"Dummy web server started on port {port}")
-    server.serve_forever()
-
-threading.Thread(target=run_dummy_server, daemon=True).start()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Async dummy web server started on port {port}")
 
 
 # ==========================================
@@ -40,8 +38,6 @@ RULES_CHANNEL_ID = 1528374067923779594
 WELCOME_CHANNEL_ID = 1282971470774931460
 APPLICATION_CHANNEL_ID = 1282972073806794776
 LOG_CHANNEL_ID = 1528610922632057004
-
-# ▼ ロール付与パネルを設置するチャンネルID ▼
 ROLE_PANEL_CHANNEL_ID = 1528397429932818513
 
 INITIAL_ROLE_IDS = [
@@ -51,8 +47,6 @@ INITIAL_ROLE_IDS = [
 ]
 RULES_AGREE_ROLE_ID = 1528404374429106366
 TRAINEE_ROLE_ID = 1528077358857326625
-
-# ▼ 付与する対象のロールID ▼
 ANNOUNCE_ROLE_ID = 1529012567874469920
 GAMENIGHT_ROLE_ID = 1529012524400246795
 
@@ -202,7 +196,7 @@ class DMApplicationView(discord.ui.View):
 
 
 # ==========================================
-# Member Join Event (Auto-roles & Welcome)
+# Events
 # ==========================================
 @bot.event
 async def on_member_join(member):
@@ -246,9 +240,6 @@ async def on_member_join(member):
             print(f"Failed to send welcome message: {e}")
 
 
-# ==========================================
-# Reaction Add & Remove Event (Rules & Roles)
-# ==========================================
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
@@ -262,37 +253,23 @@ async def on_raw_reaction_add(payload):
     if not member:
         return
 
-    # --- Rules Channel (規約同意) ---
     if payload.channel_id == RULES_CHANNEL_ID and str(payload.emoji) == "✅":
         role = guild.get_role(RULES_AGREE_ROLE_ID)
-        if role:
+        if role and role not in member.roles:
             try:
-                if role not in member.roles:
-                    await member.add_roles(role)
-                    print(f"Successfully added rules agree role to {member.name}")
-            except discord.Forbidden:
-                print("Error: Bot lacks permission to add rules agree role.")
+                await member.add_roles(role)
             except Exception as e:
                 print(f"Failed to add role: {e}")
 
-    # --- Role Panel Channel (通知ロール付与) ---
     elif payload.channel_id == ROLE_PANEL_CHANNEL_ID:
         if str(payload.emoji) == "📢":
             role = guild.get_role(ANNOUNCE_ROLE_ID)
             if role and role not in member.roles:
-                try:
-                    await member.add_roles(role)
-                    print(f"Successfully added Announce role to {member.name}")
-                except discord.Forbidden:
-                    print("Error: Bot lacks permission to add Announce role.")
+                await member.add_roles(role)
         elif str(payload.emoji) == "🎮":
             role = guild.get_role(GAMENIGHT_ROLE_ID)
             if role and role not in member.roles:
-                try:
-                    await member.add_roles(role)
-                    print(f"Successfully added Game Night role to {member.name}")
-                except discord.Forbidden:
-                    print("Error: Bot lacks permission to add Game Night role.")
+                await member.add_roles(role)
 
 
 @bot.event
@@ -305,29 +282,17 @@ async def on_raw_reaction_remove(payload):
     if not member:
         return
 
-    # --- Role Panel Channel (通知ロール解除) ---
     if payload.channel_id == ROLE_PANEL_CHANNEL_ID:
         if str(payload.emoji) == "📢":
             role = guild.get_role(ANNOUNCE_ROLE_ID)
             if role and role in member.roles:
-                try:
-                    await member.remove_roles(role)
-                    print(f"Successfully removed Announce role from {member.name}")
-                except discord.Forbidden:
-                    print("Error: Bot lacks permission to remove Announce role.")
+                await member.remove_roles(role)
         elif str(payload.emoji) == "🎮":
             role = guild.get_role(GAMENIGHT_ROLE_ID)
             if role and role in member.roles:
-                try:
-                    await member.remove_roles(role)
-                    print(f"Successfully removed Game Night role from {member.name}")
-                except discord.Forbidden:
-                    print("Error: Bot lacks permission to remove Game Night role.")
+                await member.remove_roles(role)
 
 
-# ==========================================
-# Bot Ready Event (Rules, Apps & Role Panel Setup)
-# ==========================================
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
@@ -357,7 +322,6 @@ async def on_ready():
                 color=discord.Color.blue()
             )
             await app_channel.send(embed=embed, view=DMApplicationView())
-            print("DM Application panel posted successfully.")
 
     # 2. Rules Panel
     channel = bot.get_channel(RULES_CHANNEL_ID)
@@ -375,7 +339,6 @@ async def on_ready():
             print(f"Failed to read channel history: {e}")
 
         if not already_posted:
-            print("Official rules not found. Posting now...")
             embed = discord.Embed(
                 title="Robloxian Department of Transportation",
                 description="Welcome to the RDoT. By joining this server, you agree to uphold the following standards.",
@@ -383,12 +346,12 @@ async def on_ready():
             )
             embed.add_field(
                 name="1. Professionalism & Conduct",
-                value="• Maintain Decorum: Always treat fellow members with respect. Toxic behavior, harassment, or unnecessary drama will not be tolerated.\n• Adhere to Regulations: All members must comply with standard Discord TOS as well as RZRM rules and guidelines at all times.",
+                value="• Maintain Decorum: Always treat fellow members with respect.\n• Adhere to Regulations: Compliance with Discord TOS and RZRM rules.",
                 inline=False
             )
             embed.add_field(
                 name="2. Operational Guidelines (RDoT Focus)",
-                value="• Neutrality & Support: We are a logistical and infrastructure organization, not a combat faction. Do not engage in combat unless absolutely necessary for self-defense (TSD) or under authorized direct orders.\n• Chain of Command: Respect the hierarchy. Direct all operational inquiries to your respective Division Chiefs.\n• Cooperation, Not Reliance: We support other factions (the Military, Police, etc.), but we maintain our administrative independence. Do not compromise RDoT’s integrity by acting as an unofficial subordinate to other groups.",
+                value="• Neutrality & Support: Logistical focus.\n• Chain of Command: Respect hierarchy.",
                 inline=False
             )
             embed.set_footer(text="Please react with the checkmark below to agree to the rules.")
@@ -396,11 +359,10 @@ async def on_ready():
             try:
                 msg = await channel.send(embed=embed)
                 await msg.add_reaction("✅")
-                print("Official rules have been posted successfully.")
             except Exception as e:
                 print(f"Failed to send rules: {e}")
 
-    # 3. Notification Role Panel (NEW)
+    # 3. Notification Role Panel
     role_panel_channel = bot.get_channel(ROLE_PANEL_CHANNEL_ID)
     if role_panel_channel:
         role_posted = False
@@ -419,32 +381,38 @@ async def on_ready():
             print(f"Failed to read role panel channel history: {e}")
 
         if not role_posted:
-            print("Role assignment panel not found. Posting now...")
             embed = discord.Embed(
                 title="RDoT Notification Roles",
                 description="React below to get pinged for specific server updates and events!",
                 color=discord.Color.blue()
             )
-            embed.add_field(
-                name="📢 Announcements Role",
-                value="React with 📢 to receive notifications about server news, updates, and official announcements.",
-                inline=False
-            )
-            embed.add_field(
-                name="🎮 Game Night Role",
-                value="React with 🎮 to receive notifications whenever we host community game nights and events.",
-                inline=False
-            )
+            embed.add_field(name="📢 Announcements Role", value="React with 📢 to receive notifications.", inline=False)
+            embed.add_field(name="🎮 Game Night Role", value="React with 🎮 to receive notifications.", inline=False)
             embed.set_footer(text="React to get the role. Unreact to remove it.")
 
             try:
                 msg = await role_panel_channel.send(embed=embed)
                 await msg.add_reaction("📢")
                 await msg.add_reaction("🎮")
-                print("Role assignment panel posted successfully.")
             except Exception as e:
                 print(f"Failed to send role panel: {e}")
 
-TOKEN = os.getenv("DISCORD_TOKEN")
-if TOKEN:
-    bot.run(TOKEN)
+
+# ==========================================
+# Main Async Runner
+# ==========================================
+async def main():
+    TOKEN = os.getenv("DISCORD_TOKEN")
+    if not TOKEN:
+        print("Error: DISCORD_TOKEN is missing.")
+        return
+
+    # 非同期Webサーバーの起動
+    await start_dummy_server()
+    
+    # Discord Botの起動
+    async with bot:
+        await bot.start(TOKEN)
+
+if __name__ == "__main__":
+    asyncio.run(main())
