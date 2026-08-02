@@ -39,6 +39,7 @@ WELCOME_CHANNEL_ID = 1282971470774931460
 APPLICATION_CHANNEL_ID = 1282972073806794776
 LOG_CHANNEL_ID = 1528610922632057004
 ROLE_PANEL_CHANNEL_ID = 1528397429932818513
+EXAM_CHANNEL_ID = 1533040845345919057  # 指定された試験チャンネル
 
 INITIAL_ROLE_IDS = [
     1528079171891494922,
@@ -49,6 +50,142 @@ RULES_AGREE_ROLE_ID = 1528404374429106366
 TRAINEE_ROLE_ID = 1528077358857326625
 ANNOUNCE_ROLE_ID = 1529012567874469920
 GAMENIGHT_ROLE_ID = 1529012524400246795
+# JUNIOR_ROLE_ID = 000000000000000000  # 必要に応じてJunior Transportation TechnicianのロールIDを設定してください
+
+# ==========================================
+# Exam System Components (Qualification Exam)
+# ==========================================
+EXAM_QUESTIONS = [
+    {
+        "q": "Q1. What is the official motto and core purpose of the RDOT?",
+        "options": ["A) Protect and Serve", "B) Keeping Robloxia Moving", "C) Safety First, Always", "D) Building the Future"],
+        "answer": "b"
+    },
+    {
+        "q": "Q2. What is the main objective of Evacuation & Supply Route Maintenance?",
+        "options": ["A) To build race tracks", "B) To track down hostiles", "C) To inspect/clear major roadways for emergency/evacuees", "D) To block roads completely"],
+        "answer": "c"
+    },
+    {
+        "q": "Q3. Which of the following is considered a Critical Transport Asset?",
+        "options": ["A) Traffic signals, signage, utility vehicles", "B) Heavy battle tanks", "C) Commercial buildings", "D) Personal vehicles"],
+        "answer": "a"
+    },
+    {
+        "q": "Q4. Who is required to follow the rules outlined in this handbook?",
+        "options": ["A) Only Trainees", "B) Only Junior Technicians", "C) Only active field workers", "D) All personnel, including higher ranks"],
+        "answer": "d"
+    },
+    {
+        "q": "Q5. Which of the following is classified as a Severe Violation?",
+        "options": ["A) Accidental procedural error", "B) Missing 1 day of work", "C) ToS violations, NSFW content, or hate speech", "D) Forgetting to salute"],
+        "answer": "c"
+    },
+    {
+        "q": "Q6. What is the penalty for AFK Farming?",
+        "options": ["A) Demotion, suspension, or reprimand", "B) Verbal warning only", "C) No penalty", "D) Double time count"],
+        "answer": "a"
+    },
+    {
+        "q": "Q7. Unexcused absence of what duration is classified as a Minor Violation?",
+        "options": ["A) More than 3 days", "B) More than 1 week", "C) Exceeding 2 months", "D) More than 1 year"],
+        "answer": "c"
+    },
+    {
+        "q": "Q8. What is the retake waiting period upon failing the exam?",
+        "options": ["A) No waiting period", "B) 12 hours", "C) 24 hours", "D) 1 week"],
+        "answer": "c"
+    },
+    {
+        "q": "Q9. What is the requirement to advance from Trainee to Junior Transportation Technician?",
+        "options": ["A) 60 Mins Duty Time", "B) Pass Qualification Exam", "C) Attend 3 events", "D) High Command appointment"],
+        "answer": "b"
+    },
+    {
+        "q": "Q10. How much duty time is required to advance from Junior Technician to Transportation Technician?",
+        "options": ["A) 30 Minutes", "B) 60 Minutes", "C) 120 Minutes", "D) 240 Minutes"],
+        "answer": "b"
+    }
+]
+
+class StartExamView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Take Qualification Exam", style=discord.ButtonStyle.success, custom_id="start_exam_btn")
+    async def start_exam(self, interaction: discord.Interaction, button: discord.ui.Button):
+        user = interaction.user
+
+        try:
+            await interaction.response.send_message("The Qualification Exam has started in your DMs!", ephemeral=True)
+        except Exception:
+            pass
+
+        try:
+            intro_embed = discord.Embed(
+                title="RDOT Junior Transportation Technician Qualification Exam",
+                description=(
+                    "Welcome to the qualification exam.\n"
+                    "Please reply with the corresponding letter (**A, B, C, or D**) for each question.\n"
+                    "You have 3 minutes per question. Good luck!\n\n"
+                    "**Passing Score:** 8 / 10 (80%)"
+                ),
+                color=discord.Color.gold()
+            )
+            await user.send(embed=intro_embed)
+        except discord.Forbidden:
+            await interaction.followup.send(content=f"Error: Could not send a DM to {user.mention}. Please enable DMs from server members in your privacy settings.", ephemeral=True)
+            return
+
+        score = 0
+        def check(m):
+            return m.author.id == user.id and isinstance(m.channel, discord.DMChannel)
+
+        for i, item in enumerate(EXAM_QUESTIONS):
+            q_embed = discord.Embed(
+                title=f"Question {i+1} / {len(EXAM_QUESTIONS)}",
+                description=f"**{item['q']}**\n\n" + "\n".join(item["options"]),
+                color=discord.Color.blue()
+            )
+            await user.send(embed=q_embed)
+
+            try:
+                msg = await bot.wait_for("message", timeout=180.0, check=check)
+                user_ans = msg.content.strip().lower()
+                if user_ans.startswith(item["answer"]):
+                    score += 1
+            except asyncio.TimeoutError:
+                timeout_embed = discord.Embed(
+                    title="Exam Cancelled",
+                    description="Session timed out due to inactivity. You may restart from the server when ready.",
+                    color=discord.Color.red()
+                )
+                await user.send(embed=timeout_embed)
+                return
+
+        # 結果判定
+        passed = score >= 8
+        result_color = discord.Color.green() if passed else discord.Color.red()
+        result_title = "🎉 Exam Passed!" if passed else "❌ Exam Failed"
+        result_desc = f"Your Score: **{score} / 10** (Passing Score: 8/10)\n\n"
+        
+        if passed:
+            result_desc += "Congratulations! You have passed the Junior Transportation Technician Exam.\nYour results have been logged for staff review."
+        else:
+            result_desc += "Unfortunately, you did not reach the passing score. You may retake the exam after the 24-hour waiting period."
+
+        res_embed = discord.Embed(title=result_title, description=result_desc, color=result_color)
+        await user.send(embed=res_embed)
+
+        # ログチャンネルへ結果報告
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            log_embed = discord.Embed(
+                title="Exam Result Log",
+                description=f"**User:** {user.mention} ({user.name})\n**Score:** {score}/10\n**Status:** {'Passed' if passed else 'Failed'}",
+                color=result_color
+            )
+            await log_channel.send(embed=log_embed)
 
 
 # ==========================================
@@ -298,6 +435,7 @@ async def on_ready():
     print(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
     
     bot.add_view(DMApplicationView())
+    bot.add_view(StartExamView())
     
     try:
         synced = await bot.tree.sync()
@@ -323,7 +461,28 @@ async def on_ready():
             )
             await app_channel.send(embed=embed, view=DMApplicationView())
 
-    # 2. Rules Panel
+    # 2. Exam Panel (1533040845345919057 へ投稿)
+    exam_channel = bot.get_channel(EXAM_CHANNEL_ID)
+    if exam_channel:
+        exam_posted = False
+        async for message in exam_channel.history(limit=20):
+            if message.author.id == bot.user.id and len(message.embeds) > 0:
+                if any("RDOT Qualification Exam" in str(embed.title) for embed in message.embeds):
+                    exam_posted = True
+                    break
+        
+        if not exam_posted:
+            embed = discord.Embed(
+                title="RDOT Qualification Exam",
+                description="Click the button below to take the Junior Transportation Technician Qualification Exam.\n\n"
+                            "• **Format:** 10 Multiple Choice Questions (via DM)\n"
+                            "• **Passing Score:** 80% (8/10)\n"
+                            "• **Retake Cooldown:** 24 Hours",
+                color=discord.Color.gold()
+            )
+            await exam_channel.send(embed=embed, view=StartExamView())
+
+    # 3. Rules Panel
     channel = bot.get_channel(RULES_CHANNEL_ID)
     if channel:
         already_posted = False
@@ -362,7 +521,7 @@ async def on_ready():
             except Exception as e:
                 print(f"Failed to send rules: {e}")
 
-    # 3. Notification Role Panel
+    # 4. Notification Role Panel
     role_panel_channel = bot.get_channel(ROLE_PANEL_CHANNEL_ID)
     if role_panel_channel:
         role_posted = False
