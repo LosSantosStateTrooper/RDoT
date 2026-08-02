@@ -39,8 +39,9 @@ WELCOME_CHANNEL_ID = 1282971470774931460
 APPLICATION_CHANNEL_ID = 1282972073806794776
 LOG_CHANNEL_ID = 1528610922632057004
 ROLE_PANEL_CHANNEL_ID = 1528397429932818513
-EXAM_CHANNEL_ID = 1533040845345919057  # 指定された試験チャンネル
+EXAM_CHANNEL_ID = 1533040845345919057
 
+# Initial Roles & Base Roles
 INITIAL_ROLE_IDS = [
     1528079171891494922,
     1528076207122288810,
@@ -50,7 +51,14 @@ RULES_AGREE_ROLE_ID = 1528404374429106366
 TRAINEE_ROLE_ID = 1528077358857326625
 ANNOUNCE_ROLE_ID = 1529012567874469920
 GAMENIGHT_ROLE_ID = 1529012524400246795
-# JUNIOR_ROLE_ID = 000000000000000000  # 必要に応じてJunior Transportation TechnicianのロールIDを設定してください
+
+# Timezone & Exam Promotion Role IDs
+WOR_ROLE_ID = 1528410248954646528        # WOR (条件判定用)
+EOR_ROLE_ID = 1528410287110357113        # EOR (条件判定用)
+
+WOR_JTT_ROLE_ID = 1528075985184882870    # WOR JTT (合格時付与)
+EOR_JTT_ROLE_ID = 1528077441254428843    # EOR JTT (合格時付与)
+ALL_TZ_ROLE_ID = 1528075908941086860     # 全タイムゾーン用 (合格時必須付与)
 
 # ==========================================
 # Exam System Components (Qualification Exam)
@@ -170,14 +178,48 @@ class StartExamView(discord.ui.View):
         result_desc = f"Your Score: **{score} / 10** (Passing Score: 8/10)\n\n"
         
         if passed:
-            result_desc += "Congratulations! You have passed the Junior Transportation Technician Exam.\nYour results have been logged for staff review."
+            result_desc += "Congratulations! You have passed the Junior Transportation Technician Exam.\nYour results have been logged and your new roles have been assigned!"
+            
+            # --- ロール自動付与ロジック ---
+            try:
+                guild = interaction.guild
+                if guild:
+                    member = guild.get_member(user.id)
+                    if member:
+                        roles_to_add = []
+                        
+                        # 1. 全タイムゾーン用共通ロールを絶対に追加
+                        all_tz_role = guild.get_role(ALL_TZ_ROLE_ID)
+                        if all_tz_role:
+                            roles_to_add.append(all_tz_role)
+
+                        # 2. WOR か EOR かを判定して該当するJTTロールを追加
+                        if any(r.id == WOR_ROLE_ID for r in member.roles):
+                            wor_jtt_role = guild.get_role(WOR_JTT_ROLE_ID)
+                            if wor_jtt_role:
+                                roles_to_add.append(wor_jtt_role)
+
+                        elif any(r.id == EOR_ROLE_ID for r in member.roles):
+                            eor_jtt_role = guild.get_role(EOR_JTT_ROLE_ID)
+                            if eor_jtt_role:
+                                roles_to_add.append(eor_jtt_role)
+
+                        # 付与を実行
+                        if roles_to_add:
+                            await member.add_roles(*roles_to_add)
+                            print(f"Assigned JTT roles to {member.name}: {[r.name for r in roles_to_add]}")
+
+            except Exception as e:
+                print(f"Failed to assign JTT roles to {user.name}: {e}")
+            # ----------------------------------
+
         else:
             result_desc += "Unfortunately, you did not reach the passing score. You may retake the exam after the 24-hour waiting period."
 
         res_embed = discord.Embed(title=result_title, description=result_desc, color=result_color)
         await user.send(embed=res_embed)
 
-        # ログチャンネルへ結果報告
+        # ログチャンネルへ通知
         log_channel = bot.get_channel(LOG_CHANNEL_ID)
         if log_channel:
             log_embed = discord.Embed(
@@ -461,7 +503,7 @@ async def on_ready():
             )
             await app_channel.send(embed=embed, view=DMApplicationView())
 
-    # 2. Exam Panel (1533040845345919057 へ投稿)
+    # 2. Exam Panel
     exam_channel = bot.get_channel(EXAM_CHANNEL_ID)
     if exam_channel:
         exam_posted = False
@@ -566,10 +608,8 @@ async def main():
         print("Error: DISCORD_TOKEN is missing.")
         return
 
-    # 非同期Webサーバーの起動
     await start_dummy_server()
     
-    # Discord Botの起動
     async with bot:
         await bot.start(TOKEN)
 
